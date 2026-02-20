@@ -15,6 +15,7 @@ This repo packages **OpenClaw** for Railway with a small **/setup** web wizard s
 - The wrapper protects `/setup` with `SETUP_PASSWORD`.
 - During setup, the wrapper runs `openclaw onboard --non-interactive ...` inside the container, writes state to the volume, and then starts the gateway.
 - After setup, **`/` is OpenClaw**. The wrapper reverse-proxies all traffic (including WebSockets) to the local gateway process.
+- No `systemd` needed: the wrapper auto-starts the gateway at container boot and includes an in-process watchdog that restarts the gateway if it exits unexpectedly.
 
 ## Getting chat tokens (so you don't have to scramble)
 
@@ -62,6 +63,7 @@ The web TUI implements multiple security layers:
 | `ENABLE_WEB_TUI` | `false` | Set to `true` to enable |
 | `TUI_IDLE_TIMEOUT_MS` | `300000` (5 min) | Closes session after inactivity |
 | `TUI_MAX_SESSION_MS` | `1800000` (30 min) | Maximum session duration |
+| `GATEWAY_WATCHDOG_INTERVAL_MS` | `30000` (30 sec) | How often the wrapper checks and auto-restarts a stopped gateway |
 
 ## Local testing
 

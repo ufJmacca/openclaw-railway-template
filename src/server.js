@@ -83,6 +83,10 @@ const TUI_MAX_SESSION_MS = Number.parseInt(
   process.env.TUI_MAX_SESSION_MS ?? "1800000",
   10,
 );
+const GATEWAY_WATCHDOG_INTERVAL_MS = Number.parseInt(
+  process.env.GATEWAY_WATCHDOG_INTERVAL_MS ?? "30000",
+  10,
+);
 
 function clawArgs(args) {
   return [OPENCLAW_ENTRY, ...args];
@@ -106,6 +110,7 @@ function isConfigured() {
 let gatewayProc = null;
 let gatewayStarting = null;
 let shuttingDown = false;
+let gatewayWatchdogInterval = null;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -248,6 +253,32 @@ async function restartGateway() {
     gatewayProc = null;
   }
   return ensureGatewayRunning();
+}
+
+function startGatewayWatchdog() {
+  if (gatewayWatchdogInterval || !isConfigured()) return;
+
+  gatewayWatchdogInterval = setInterval(async () => {
+    if (shuttingDown || !isConfigured() || gatewayStarting) return;
+    if (gatewayProc && !gatewayProc.killed) return;
+
+    console.warn("[gateway-watchdog] gateway is not running; attempting restart");
+    try {
+      await ensureGatewayRunning();
+    } catch (err) {
+      console.error(`[gateway-watchdog] restart failed: ${err.message}`);
+    }
+  }, GATEWAY_WATCHDOG_INTERVAL_MS);
+
+  if (gatewayWatchdogInterval.unref) {
+    gatewayWatchdogInterval.unref();
+  }
+}
+
+function stopGatewayWatchdog() {
+  if (!gatewayWatchdogInterval) return;
+  clearInterval(gatewayWatchdogInterval);
+  gatewayWatchdogInterval = null;
 }
 
 const setupRateLimiter = {
@@ -715,6 +746,7 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
 
       extra += "\n[setup] Starting gateway...\n";
       await restartGateway();
+      startGatewayWatchdog();
       extra += "[setup] Gateway started.\n";
     }
 
@@ -1015,6 +1047,7 @@ const server = app.listen(PORT, () => {
         console.warn(`[wrapper] doctor --fix failed: ${err.message}`);
       }
       await ensureGatewayRunning();
+      startGatewayWatchdog();
     })().catch((err) => {
       console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
     });
@@ -1072,6 +1105,8 @@ async function gracefulShutdown(signal) {
   if (setupRateLimiter.cleanupInterval) {
     clearInterval(setupRateLimiter.cleanupInterval);
   }
+
+  stopGatewayWatchdog();
 
   if (activeTuiSession) {
     try {
